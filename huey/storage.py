@@ -1,3 +1,4 @@
+from abc import ABC
 from collections import deque
 import base64
 import contextlib
@@ -8,6 +9,8 @@ import json
 import os
 import re
 import shutil
+import sys
+
 try:
     import sqlite3
 except ImportError:
@@ -16,7 +19,6 @@ import struct
 import threading
 import time
 import warnings
-
 try:
     from redis import ConnectionPool
     try:
@@ -26,6 +28,11 @@ try:
     from redis.exceptions import ConnectionError
 except ImportError:
     ConnectionPool = Redis = ConnectionError = None
+
+try:
+    from rediscluster import ClusterConnectionPool, RedisCluster
+except ImportError:
+    ClusterConnectionPool, RedisCluster = None
 
 from huey.constants import EmptyData
 from huey.exceptions import ConfigurationError
@@ -243,21 +250,37 @@ class BaseStorage(object):
 
 class BlackHoleStorage(BaseStorage):
     def enqueue(self, data, priority=None): pass
+
     def dequeue(self): pass
+
     def queue_size(self): return 0
+
     def enqueued_items(self, limit=None): return []
+
     def flush_queue(self): pass
+
     def add_to_schedule(self, data, ts, utc): pass
+
     def read_schedule(self, ts): return []
+
     def schedule_size(self): return 0
+
     def scheduled_items(self, limit=None): return []
+
     def flush_schedule(self): pass
+
     def put_data(self, key, value, is_result=False): pass
+
     def peek_data(self, key): return EmptyData
+
     def pop_data(self, key): return EmptyData
+
     def has_data_for_key(self, key): return False
+
     def result_store_size(self): return 0
+
     def result_items(self): return {}
+
     def flush_results(self): pass
 
 
@@ -358,39 +381,14 @@ if #res and redis.call('zremrangebyscore', key, '-inf', unix_ts) == #res then
 end"""
 
 
-class RedisStorage(BaseStorage):
-    priority = False  # Use PriorityRedisStorage instead. Requires Redis>=5.0.
-    redis_client = Redis
+class RedisBaseStorage(BaseStorage):
 
-    def __init__(self, name='huey', blocking=True, read_timeout=1,
-                 connection_pool=None, url=None, client_name=None,
+    def __init__(self, name='huey', blocking=True, read_timeout=1, client_name=None,
                  **connection_params):
 
-        if Redis is None:
-            raise ConfigurationError('"redis" python module not found, cannot '
-                                     'use Redis storage backend. Run "pip '
-                                     'install redis" to install.')
+        if 'conn' not in self:
+            raise ConfigurationError('No connection in RedisBaseStorage')
 
-        # Drop common empty values from the connection_params.
-        for p in ('host', 'port', 'db'):
-            if p in connection_params and connection_params[p] is None:
-                del connection_params[p]
-
-        if sum(1 for p in (url, connection_pool, connection_params) if p) > 1:
-            raise ConfigurationError(
-                'The connection configuration is over-determined. '
-                'Please specify only one of the following: '
-                '"url", "connection_pool", or "connection_params"')
-
-        if url:
-            connection_pool = ConnectionPool.from_url(
-                url, decode_components=True)
-        elif connection_pool is None:
-            connection_pool = ConnectionPool(**connection_params)
-
-        self.pool = connection_pool
-        self.conn = self.redis_client(connection_pool=connection_pool)
-        self.connection_params = connection_params
         self._pop = self.conn.register_script(SCHEDULE_POP_LUA)
 
         self.name = self.clean_name(name)
@@ -494,7 +492,68 @@ class RedisStorage(BaseStorage):
         self.conn.delete(self.result_key)
 
 
-class RedisExpireStorage(RedisStorage):
+class RedisStorage(RedisBaseStorage):
+    priority = False  # Use PriorityRedisStorage instead. Requires Redis>=5.0.
+    redis_client = Redis
+
+    def __init__(self, name='huey', blocking=True, read_timeout=1,
+                 connection_pool=None, url=None, client_name=None,
+                 **connection_params):
+
+        if Redis is None:
+            raise ConfigurationError('"redis" python module not found, cannot '
+                                     'use Redis storage backend. Run "pip '
+                                     'install redis" to install.')
+
+        # Drop common empty values from the connection_params.
+        for p in ('host', 'port', 'db'):
+            if p in connection_params and connection_params[p] is None:
+                del connection_params[p]
+
+        if sum(1 for p in (url, connection_pool, connection_params) if p) > 1:
+            raise ConfigurationError(
+                'The connection configuration is over-determined. '
+                'Please specify only one of the following: '
+                '"url", "connection_pool", or "connection_params"')
+
+        if url:
+            connection_pool = ConnectionPool.from_url(
+                url, decode_components=True)
+        elif connection_pool is None:
+            connection_pool = ConnectionPool(**connection_params)
+
+        self.pool = connection_pool
+        self.conn = self.redis_client(connection_pool=connection_pool)
+        self.connection_params = connection_params
+
+        super(RedisStorage, self).__init__(name, blocking, read_timeout, **connection_params)
+
+
+class RedisClusterStorage(RedisBaseStorage):
+    priority = False  # Use PriorityRedisStorage instead. Requires Redis>=5.0.
+    redis_client = RedisCluster
+
+    def __init__(self, name='huey', blocking=True, read_timeout=1,
+                 startup_nodes=None, **connection_params):
+
+        if RedisCluster is None:
+            raise ConfigurationError('"redis-py-cluster" python module not found, cannot '
+                                     'use RedisCluster storage backend. Run "pip '
+                                     'install redis-py-cluster" to install.')
+
+        if startup_nodes is None:
+            raise ConfigurationError('startup_nodes parameter required')
+
+        decode_responses = False
+        if sys.version_info >= (3, 0, 0):
+            decode_responses = True
+
+        self.conn = self.redis_client(startup_nodes=startup_nodes, decode_responses=decode_responses)
+
+        super(RedisClusterStorage, self).__init__(name, blocking, read_timeout, **connection_params)
+
+
+class RedisExpireStorageMixin(object):
     # Redis storage subclass that adds expiration to task result values. Since
     # the Redis server handles deleting our results after the expiration time,
     # this storage layer will not delete the results when they are read.
@@ -557,7 +616,15 @@ class RedisExpireStorage(RedisStorage):
             self.conn.delete(*keys)
 
 
-class RedisPriorityQueue(object):
+class RedisExpireStorage(RedisExpireStorageMixin, RedisStorage):
+    pass
+
+
+class RedisExpireClusterStorage(RedisExpireStorageMixin, RedisClusterStorage):
+    pass
+
+
+class RedisPriorityQueueMixin(object):
     priority = True
 
     def enqueue(self, data, priority=None):
@@ -597,23 +664,38 @@ class RedisPriorityQueue(object):
         return [item[8:] for item in items]  # Unprefix the data.
 
 
-class PriorityRedisStorage(RedisPriorityQueue, RedisStorage): pass
+class PriorityRedisStorage(RedisPriorityQueueMixin, RedisStorage):
+    pass
 
 
-class PriorityRedisExpireStorage(RedisPriorityQueue, RedisExpireStorage): pass
+class PriorityRedisClusterStorage(RedisPriorityQueueMixin, RedisClusterStorage):
+    pass
+
+
+class PriorityRedisExpireStorage(RedisPriorityQueueMixin, RedisExpireStorage):
+    pass
+
+
+class PriorityRedisExpireClusterStorage(RedisPriorityQueueMixin, RedisExpireClusterStorage):
+    pass
 
 
 class _ConnectionState(object):
     def __init__(self, **kwargs):
         super(_ConnectionState, self).__init__(**kwargs)
         self.reset()
+
     def reset(self):
         self.conn = None
         self.closed = True
+
     def set_connection(self, conn):
         self.conn = conn
         self.closed = False
+
+
 class _ConnectionLocal(_ConnectionState, threading.local): pass
+
 
 # Python 2.x may return <buffer> object for BLOB columns.
 to_bytes = lambda b: bytes(b) if not isinstance(b, bytes) else b
