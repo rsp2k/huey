@@ -22,7 +22,8 @@ from huey.exceptions import TaskException
 from huey.exceptions import TaskLockedException
 from huey.registry import Registry
 from huey.serializer import Serializer
-from huey.storage import BlackHoleStorage
+from huey.storage import BlackHoleStorage, RedisClusterStorage, RedisClusterExpireStorage, PriorityRedisClusterStorage, \
+    PriorityRedisClusterExpireStorage
 from huey.storage import FileStorage
 from huey.storage import MemoryStorage
 from huey.storage import PriorityRedisExpireStorage
@@ -1049,14 +1050,26 @@ class SqliteHuey(Huey):
 class RedisHuey(Huey):
     storage_class = RedisStorage
 
+class RedisClusterHuey(Huey):
+    storage_class = RedisClusterStorage
+
 class RedisExpireHuey(Huey):
     storage_class = RedisExpireStorage
+
+class RedisClusterExpireHuey(Huey):
+    storage_class = RedisClusterExpireStorage
 
 class PriorityRedisHuey(Huey):
     storage_class = PriorityRedisStorage
 
+class PriorityRedisClusterHuey(Huey):
+    storage_class = PriorityRedisClusterStorage
+
 class PriorityRedisExpireHuey(Huey):
     storage_class = PriorityRedisExpireStorage
+
+class PriorityRedisClusterExpireHuey(Huey):
+    storage_class = PriorityRedisClusterExpireStorage
 
 class FileHuey(Huey):
     storage_class = FileStorage

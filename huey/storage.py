@@ -620,7 +620,7 @@ class RedisExpireStorage(RedisExpireStorageMixin, RedisStorage):
     pass
 
 
-class RedisExpireClusterStorage(RedisExpireStorageMixin, RedisClusterStorage):
+class RedisClusterExpireStorage(RedisExpireStorageMixin, RedisClusterStorage):
     pass
 
 
@@ -676,7 +676,7 @@ class PriorityRedisExpireStorage(RedisPriorityQueueMixin, RedisExpireStorage):
     pass
 
 
-class PriorityRedisExpireClusterStorage(RedisPriorityQueueMixin, RedisExpireClusterStorage):
+class PriorityRedisClusterExpireStorage(RedisPriorityQueueMixin, RedisClusterExpireStorage):
     pass
 
 

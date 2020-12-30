@@ -13,7 +13,7 @@ except ImportError:
 from redis.connection import ConnectionPool
 from redis import Redis
 
-from huey.api import Huey
+from huey.api import Huey, RedisClusterHuey, PriorityRedisClusterHuey
 from huey.api import MemoryHuey
 from huey.api import PriorityRedisHuey
 from huey.api import RedisExpireHuey
@@ -180,6 +180,11 @@ class TestRedisStorage(StorageTests, BaseTestCase):
         RedisHuey(host=None, port=None, db=None, url='redis://localhost')
 
 
+class TestRedisClusterStorage(StorageTests, BaseTestCase):
+    def get_huey(self):
+        return RedisClusterHuey(startup_nodes=[{"host": "127.0.0.1", "port": "7000"}])
+
+
 class TestRedisExpireStorage(StorageTests, BaseTestCase):
     # Note that this does not subclass the StorageTests. This is partly because
     # the functionality should already be covered by the TestRedisStorage, as
@@ -255,6 +260,11 @@ class TestRedisExpireStorage(StorageTests, BaseTestCase):
         self.assertEqual(self.huey.result_count(), 2)  # r1 and r3 still there.
 
 
+class TestRedisClusterExpireStorage(TestRedisExpireStorage):
+    def get_huey(self):
+        return RedisClusterHuey(startup_nodes=[{"host": "127.0.0.1", "port": "7000"}])
+
+
 def get_redis_version():
     return int(Redis().info()['redis_version'].split('.', 1)[0])
 
@@ -266,9 +276,21 @@ class TestPriorityRedisStorage(TestRedisStorage):
 
 
 @unittest.skipIf(get_redis_version() < 5, 'Requires Redis >= 5.0')
+class TestPriorityRedisClusterStorage(TestRedisClusterStorage):
+    def get_huey(self):
+        return PriorityRedisClusterHuey(utc=False)
+
+
+@unittest.skipIf(get_redis_version() < 5, 'Requires Redis >= 5.0')
 class TestPriorityRedisStorageNotBlocking(TestRedisStorage):
     def get_huey(self):
         return PriorityRedisHuey(utc=False, blocking=False)
+
+
+@unittest.skipIf(get_redis_version() < 5, 'Requires Redis >= 5.0')
+class TestPriorityRedisClusterStorageNotBlocking(TestRedisClusterStorage):
+    def get_huey(self):
+        return PriorityRedisClusterHuey(utc=False, blocking=False)
 
 
 class TestSqliteStorage(StorageTests, BaseTestCase):
